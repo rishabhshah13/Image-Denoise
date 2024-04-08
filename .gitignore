@@ -2,3 +2,10 @@ PyTorch-GAN/*
 SIDD_Small_sRGB_Only/*
 smartphone-image-denoising-dataset.zip
 imagdenv/*
+combined.zip
+test_dataloader*
+train_dataloader*
+images/*
+SIDD_medium*
+SIDD_Small_sRGB*
+*.pyc

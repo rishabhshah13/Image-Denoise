@@ -91,31 +91,49 @@ optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt
 
 
 
-from DataLoader import CustomDataset
-from sklearn.model_selection import train_test_split
+# from DataLoader import CustomDataset
+# from sklearn.model_selection import train_test_split
 
-# Define transformations to be applied to the images
+# # Define transformations to be applied to the images
+# transform = transforms.Compose([
+#     transforms.Resize((256, 256)),  # Resize the image
+#     transforms.ToTensor(),           # Convert to tensor
+#     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Normalize
+# ])
+
+# # Set root directory
+# # root_dir = 'data'
+# root_dir='SIDD_Small_sRGB_Only/SIDD_Small_sRGB_Only/Data/' #dataset directory
+
+
+# # Create dataset
+# dataset = CustomDataset(root_dir, transform=transform)
+
+# # Split dataset into train and test sets
+# train_dataset, test_dataset = train_test_split(dataset, test_size=0.2, random_state=42)
+
+# # Create dataloaders for train and test sets
+# dataloader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+# val_dataloader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+
+
+from DataLoaderManager import DataLoaderManager
+from torchvision import transforms
+
+
+# Example usage:
 transform = transforms.Compose([
     transforms.Resize((256, 256)),  # Resize the image
     transforms.ToTensor(),           # Convert to tensor
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Normalize
 ])
 
-# Set root directory
-# root_dir = 'data'
-root_dir='SIDD_Small_sRGB_Only/Data/' #dataset directory
+data_loader_manager = DataLoaderManager(root_dir='SIDD_Small_sRGB_Only/SIDD_Small_sRGB_Only/Data/', transform=transform)
+dataloader, val_dataloader = data_loader_manager.process_dataloaders(batch_size=32, shuffle=True)
 
-
-# Create dataset
-dataset = CustomDataset(root_dir, transform=transform)
-
-# Split dataset into train and test sets
-train_dataset, test_dataset = train_test_split(dataset, test_size=0.2, random_state=42)
-
-# Create dataloaders for train and test sets
-dataloader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-val_dataloader = DataLoader(test_dataset, batch_size=32, shuffle=False)
-
+print("Dataloader"*100)
+print(len(dataloader.dataset))
+# print(dataloader.dataset[0])
 
 
 # Tensor type

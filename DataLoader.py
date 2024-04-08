@@ -4,6 +4,9 @@ from PIL import Image
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
+from tqdm import tqdm
+
+
 
 class CustomDataset(Dataset):
     def __init__(self, root_dir, transform=None):
@@ -12,7 +15,7 @@ class CustomDataset(Dataset):
         self.image_paths = []
         
         # Iterate through folders and collect image paths
-        for folder_name in os.listdir(root_dir):
+        for folder_name in tqdm(os.listdir(root_dir)):
             folder_path = os.path.join(root_dir, folder_name)
             if os.path.isdir(folder_path):
                 for image_name in os.listdir(os.path.join(folder_path)):
