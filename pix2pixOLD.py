@@ -21,12 +21,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 
-
 parser = argparse.ArgumentParser()
 parser.add_argument("--epoch", type=int, default=0, help="epoch to start training from")
-parser.add_argument("--n_epochs", type=int, default=500, help="number of epochs of training")
+parser.add_argument("--n_epochs", type=int, default=100, help="number of epochs of training")
 parser.add_argument("--dataset_name", type=str, default="SIDD", help="name of the dataset")
-parser.add_argument("--batch_size", type=int, default=128, help="size of the batches")
+parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
 parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
@@ -70,7 +69,6 @@ patch = (1, opt.img_height // 2 ** 4, opt.img_width // 2 ** 4)
 # Initialize generator and discriminator
 generator = GeneratorUNet()
 discriminator = Discriminator()
-
 
 if cuda:
     generator = generator.cuda()
