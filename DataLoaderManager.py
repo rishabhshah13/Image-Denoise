@@ -18,15 +18,46 @@ class CustomDataset(Dataset):
         gt_image_path = self.data[idx]['gt']
         noisy_image_path = self.data[idx]['noisy']
         
+        # print(gt_image_path)
+        # print(noisy_image_path)
+
+        # print()
+        # print()
+        # print()
+        # print()
+
+
         gt_image = Image.open(gt_image_path).convert('RGB')
         noisy_image = Image.open(noisy_image_path).convert('RGB')
-
+        
         if self.transform:
             gt_image = self.transform(gt_image)
             noisy_image = self.transform(noisy_image)
 
         return gt_image, noisy_image
 
+
+
+
+
+
+import matplotlib.pyplot as plt  # Import for using plt
+def display_progress(cond, real, fake, figsize=(10,5)):
+    cond = cond.detach().cpu().permute(1, 2, 0)
+    fake = fake.detach().cpu().permute(1, 2, 0)
+    real = real.detach().cpu().permute(1, 2, 0)
+
+    fig, ax = plt.subplots(1, 3, figsize=figsize)
+    ax[0].imshow(cond)
+    ax[1].imshow(real)
+    ax[2].imshow(fake)
+    plt.show()
+
+
+
+
+
+    
 class DataLoaderManager:
     def __init__(self, root_dir, transform=None):
         self.root_dir = root_dir
@@ -36,12 +67,29 @@ class DataLoaderManager:
         print("Collecting image paths...")
         for folder_name in tqdm(os.listdir(root_dir)):
             folder_path = os.path.join(root_dir, folder_name)
+            # print(folder_path)
             if os.path.isdir(folder_path):
-                for image_name in os.listdir(os.path.join(folder_path)):
-                    self.image_paths.append({
-                        'gt': os.path.join(folder_path, image_name),
-                        'noisy': os.path.join(folder_path, image_name)
+                image_names = os.listdir(os.path.join(folder_path))
+                self.image_paths.append({
+                        'gt': os.path.join(folder_path, image_names[0]),
+                        'noisy': os.path.join(folder_path, image_names[1])
                     })
+                
+                # for image_name in os.listdir(os.path.join(folder_path)):
+                #     print(image_name)
+                #     self.image_paths.append({
+                #         'gt': os.path.join(folder_path, image_name),
+                #         'noisy': os.path.join(folder_path, image_name)
+                #     })
+            
+            # print()
+            # print()
+            # print()
+            # print()
+                
+
+        # print(self.image_paths)
+
 
     def create_datasets(self):
         print("Creating datasets...")
@@ -76,8 +124,6 @@ class DataLoaderManager:
 
         return DataLoader(data_list, batch_size=batch_size, shuffle=False)
     
-
-
 
     def process_dataloaders(self, batch_size=32, shuffle=True):
         train_filename = 'train_dataloader.npy'
