@@ -9,3 +9,7 @@ images/*
 SIDD_medium*
 SIDD_Small_sRGB*
 *.pyc
+facades/*
+# pix2pix-GANs-master/*
+lightning_logs/*
+facades.tar.gz
