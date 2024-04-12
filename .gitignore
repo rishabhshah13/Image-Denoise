@@ -13,3 +13,4 @@ facades/*
 # pix2pix-GANs-master/*
 lightning_logs/*
 facades.tar.gz
+heldout_test_train_dataloader.npy
