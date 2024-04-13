@@ -56,7 +56,7 @@ class DataLoaderManager:
         # self.train_file = f'Dataset\{train_file}_train_dataloader.npy'
         # self.test_file = f'Dataset\{test_file}_train_dataloader.npy'
         self.train_file = f'{train_file}_train_dataloader.npy'
-        self.test_file = f'{test_file}_train_dataloader.npy'
+        self.test_file = f'{test_file}_test_dataloader.npy'
         self.make_held_out_set  = make_held_out_set
 
         folder_name = "Datasets"
@@ -80,6 +80,7 @@ class DataLoaderManager:
         ## Primary Contact
 
         else:
+            print("NOT HELDOUT")
             folder_list = os.listdir(root_dir)
             heldout_list = ['0135_006_IP_00400_00400_5500_N', '0138_006_IP_00100_00100_3200_L', '0180_008_GP_00100_00100_5500_N', '0070_003_IP_02000_04000_3200_N', '0121_006_N6_03200_01000_3200_L', '0035_002_GP_00800_00350_3200_N', '0130_006_GP_00400_00400_4400_N', '0065_003_GP_10000_08460_4400_N', '0129_006_GP_00100_00100_4400_N', '0181_008_GP_00800_00800_5500_N', '0022_001_N6_00100_00060_5500_N', '0108_005_GP_06400_06400_4400_N', '0017_001_GP_00100_00060_5500_N', '0086_004_GP_00100_00100_5500_L', '0029_001_IP_00800_01000_5500_N', '0036_002_GP_06400_03200_3200_N', '0164_007_IP_00400_00400_3200_N', '0188_008_IP_00100_00100_3200_N', '0126_006_S6_00400_00200_4400_L', '0018_001_GP_00100_00160_5500_L', '0097_005_N6_03200_02000_3200_L', '0020_001_GP_00800_00350_5500_N', '0014_001_S6_03200_01250_3200_N', '0011_001_S6_00800_00500_5500_L', '0038_002_GP_00800_00640_3200_L', '0192_009_IP_00100_00200_3200_N', '0125_006_S6_00100_00050_4400_L', '0072_003_IP_01000_02000_5500_L', '0167_008_N6_00100_00050_4400_L', '0134_006_IP_00100_00100_5500_N', '0173_008_G4_00400_00400_4400_N', '0101_005_S6_00100_00050_4400_L']
             new_list = [img_name for img_name in folder_list if img_name not in heldout_list]

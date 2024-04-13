@@ -14,3 +14,4 @@ facades/*
 lightning_logs/*
 facades.tar.gz
 heldout_test_train_dataloader.npy
+dataset.zip
