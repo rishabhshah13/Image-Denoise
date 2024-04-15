@@ -20,3 +20,4 @@ PyTorch-CycleGAN
 heldout_test.npy
 lightning_logs\*
 lightning_logs copy\*
+pix2pixDenoise.ipynb
