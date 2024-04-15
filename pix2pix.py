@@ -1,219 +1,332 @@
-import argparse
 import os
-import numpy as np
-import math
-import itertools
-import time
-import datetime
-import sys
+from glob import glob
+from pathlib import Path
 
-import torchvision.transforms as transforms
-from torchvision.utils import save_image
-
-from torch.utils.data import DataLoader
-from torchvision import datasets
-from torch.autograd import Variable
-
-from models import *
-from datasets import *
-
-import torch.nn as nn
-import torch.nn.functional as F
+import matplotlib.pyplot as plt
+import pytorch_lightning as pl
 import torch
-
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--epoch", type=int, default=0, help="epoch to start training from")
-parser.add_argument("--n_epochs", type=int, default=500, help="number of epochs of training")
-parser.add_argument("--dataset_name", type=str, default="SIDD", help="name of the dataset")
-parser.add_argument("--batch_size", type=int, default=128, help="size of the batches")
-parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
-parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
-parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
-parser.add_argument("--decay_epoch", type=int, default=100, help="epoch from which to start lr decay")
-parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads to use during batch generation")
-parser.add_argument("--img_height", type=int, default=256, help="size of image height")
-parser.add_argument("--img_width", type=int, default=256, help="size of image width")
-parser.add_argument("--channels", type=int, default=3, help="number of image channels")
-parser.add_argument(
-    "--sample_interval", type=int, default=500, help="interval between sampling of images from generators"
-)
-parser.add_argument(
-    "--train_dataset_loc", type=str, default=500, help="location of the train npy dataset"
-)
-parser.add_argument(
-    "--test_dataset_loc", type=str, default=500, help="location of the test npy dataset"
-)
-
-parser.add_argument("--checkpoint_interval", type=int, default=-1, help="interval between model checkpoints")
-opt = parser.parse_args()
-print(opt)
-
-
-
-
-os.makedirs("images/%s" % opt.dataset_name, exist_ok=True)
-os.makedirs("saved_models/%s" % opt.dataset_name, exist_ok=True)
-
-cuda = True if torch.cuda.is_available() else False
-
-# Loss functions
-criterion_GAN = torch.nn.MSELoss()
-criterion_pixelwise = torch.nn.L1Loss()
-
-# Loss weight of L1 pixel-wise loss between translated image and real image
-lambda_pixel = 100
-
-# Calculate output of image discriminator (PatchGAN)
-patch = (1, opt.img_height // 2 ** 4, opt.img_width // 2 ** 4)
-
-# Initialize generator and discriminator
-generator = GeneratorUNet()
-discriminator = Discriminator()
-
-
-if cuda:
-    generator = generator.cuda()
-    discriminator = discriminator.cuda()
-    criterion_GAN.cuda()
-    criterion_pixelwise.cuda()
-
-if opt.epoch != 0:
-    # Load pretrained models
-    generator.load_state_dict(torch.load("saved_models/%s/generator_%d.pth" % (opt.dataset_name, opt.epoch)))
-    discriminator.load_state_dict(torch.load("saved_models/%s/discriminator_%d.pth" % (opt.dataset_name, opt.epoch)))
-else:
-    # Initialize weights
-    generator.apply(weights_init_normal)
-    discriminator.apply(weights_init_normal)
-
-# Optimizers
-optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
-optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
-
-
-from DataLoaderManager import DataLoaderManager
+from PIL import Image
+from torch import nn
+from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
+from torchvision.transforms.functional import center_crop
+from torchvision.utils import make_grid
+from tqdm.auto import tqdm
+from torchmetrics.functional.image import structural_similarity_index_measure
+from torchmetrics.functional.image import peak_signal_noise_ratio
 
 
-# Example usage:
-transform = transforms.Compose([
-    transforms.Resize((256, 256)),  # Resize the image
-    transforms.ToTensor(),           # Convert to tensor
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Normalize
-])
 
-data_loader_manager = DataLoaderManager(root_dir='SIDD_Small_sRGB_Only/SIDD_Small_sRGB_Only/Data/', transform=transform)
-dataloader, val_dataloader = data_loader_manager.process_dataloaders(batch_size=32, shuffle=True)
+class DownSampleConv(nn.Module):
 
-print("Dataloader"*100)
-print(len(dataloader.dataset))
-# print(dataloader.dataset[0])
+    def __init__(self, in_channels, out_channels, kernel=4, strides=2, padding=1, activation=True, batchnorm=True):
+        """
+        Paper details:
+        - C64-C128-C256-C512-C512-C512-C512-C512
+        - All convolutions are 4×4 spatial filters applied with stride 2
+        - Convolutions in the encoder downsample by a factor of 2
+        """
+        super().__init__()
+        self.activation = activation
+        self.batchnorm = batchnorm
+
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel, strides, padding)
+
+        if batchnorm:
+            self.bn = nn.BatchNorm2d(out_channels)
+
+        if activation:
+            self.act = nn.LeakyReLU(0.2)
+
+    def forward(self, x):
+        x = self.conv(x)
+        if self.batchnorm:
+            x = self.bn(x)
+        if self.activation:
+            x = self.act(x)
+        return x
+    
+
+class UpSampleConv(nn.Module):
+
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel=4,
+        strides=2,
+        padding=1,
+        activation=True,
+        batchnorm=True,
+        dropout=False
+    ):
+        super().__init__()
+        self.activation = activation
+        self.batchnorm = batchnorm
+        self.dropout = dropout
+
+        self.deconv = nn.ConvTranspose2d(in_channels, out_channels, kernel, strides, padding)
+
+        if batchnorm:
+            self.bn = nn.BatchNorm2d(out_channels)
+
+        if activation:
+            self.act = nn.ReLU(True)
+
+        if dropout:
+            self.drop = nn.Dropout2d(0.5)
+
+    def forward(self, x):
+        x = self.deconv(x)
+        if self.batchnorm:
+            x = self.bn(x)
+
+        if self.dropout:
+            x = self.drop(x)
+        return x
+    
 
 
-# Tensor type
-Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
+class Generator(nn.Module):
+
+    def __init__(self, in_channels, out_channels):
+        """
+        Paper details:
+        - Encoder: C64-C128-C256-C512-C512-C512-C512-C512
+        - All convolutions are 4×4 spatial filters applied with stride 2
+        - Convolutions in the encoder downsample by a factor of 2
+        - Decoder: CD512-CD1024-CD1024-C1024-C1024-C512 -C256-C128
+        """
+        super().__init__()
+
+        # encoder/donwsample convs
+        self.encoders = [
+            DownSampleConv(in_channels, 64, batchnorm=False),  # bs x 64 x 128 x 128
+            DownSampleConv(64, 128),  # bs x 128 x 64 x 64
+            DownSampleConv(128, 256),  # bs x 256 x 32 x 32
+            DownSampleConv(256, 512),  # bs x 512 x 16 x 16
+            DownSampleConv(512, 512),  # bs x 512 x 8 x 8
+            DownSampleConv(512, 512),  # bs x 512 x 4 x 4
+            DownSampleConv(512, 512),  # bs x 512 x 2 x 2
+            DownSampleConv(512, 512, batchnorm=False),  # bs x 512 x 1 x 1
+        ]
+
+        # decoder/upsample convs
+        self.decoders = [
+            UpSampleConv(512, 512, dropout=True),  # bs x 512 x 2 x 2
+            UpSampleConv(1024, 512, dropout=True),  # bs x 512 x 4 x 4
+            UpSampleConv(1024, 512, dropout=True),  # bs x 512 x 8 x 8
+            UpSampleConv(1024, 512),  # bs x 512 x 16 x 16
+            UpSampleConv(1024, 256),  # bs x 256 x 32 x 32
+            UpSampleConv(512, 128),  # bs x 128 x 64 x 64
+            UpSampleConv(256, 64),  # bs x 64 x 128 x 128
+        ]
+        self.decoder_channels = [512, 512, 512, 512, 256, 128, 64]
+        self.final_conv = nn.ConvTranspose2d(64, out_channels, kernel_size=4, stride=2, padding=1)
+        self.tanh = nn.Tanh()
+
+        self.encoders = nn.ModuleList(self.encoders)
+        self.decoders = nn.ModuleList(self.decoders)
+
+    def forward(self, x):
+        skips_cons = []
+        for encoder in self.encoders:
+            x = encoder(x)
+
+            skips_cons.append(x)
+
+        skips_cons = list(reversed(skips_cons[:-1]))
+        decoders = self.decoders[:-1]
+
+        for decoder, skip in zip(decoders, skips_cons):
+            x = decoder(x)
+            # print(x.shape, skip.shape)
+            x = torch.cat((x, skip), axis=1)
+
+        x = self.decoders[-1](x)
+        # print(x.shape)
+        x = self.final_conv(x)
+        return self.tanh(x)
+    
 
 
-def sample_images(batches_done):
-    """Saves a generated sample from the validation set"""
-    imgs = next(iter(val_dataloader))
-    real_A = Variable(imgs[0].type(Tensor))
-    real_B = Variable(imgs[1].type(Tensor))
-    fake_B = generator(real_A)
-    img_sample = torch.cat((real_A.data, fake_B.data, real_B.data), -2)
-    save_image(img_sample, "images/%s/%s.png" % (opt.dataset_name, batches_done), nrow=5, normalize=True)
+class PatchGAN(nn.Module):
+
+    def __init__(self, input_channels):
+        super().__init__()
+        self.d1 = DownSampleConv(input_channels, 64, batchnorm=False)
+        self.d2 = DownSampleConv(64, 128)
+        self.d3 = DownSampleConv(128, 256)
+        self.d4 = DownSampleConv(256, 512)
+        self.final = nn.Conv2d(512, 1, kernel_size=1)
+
+    def forward(self, x, y):
+        x = torch.cat([x, y], axis=1)
+        x0 = self.d1(x)
+        x1 = self.d2(x0)
+        x2 = self.d3(x1)
+        x3 = self.d4(x2)
+        xn = self.final(x3)
+        return xn
+    
+
+adversarial_loss = nn.BCEWithLogitsLoss()
+
+reconstruction_loss = nn.L1Loss()
 
 
-# ----------
-#  Training
-# ----------
 
-prev_time = time.time()
 
-for epoch in range(opt.epoch, opt.n_epochs):
-    for i, batch in enumerate(dataloader):
+def _weights_init(m):
+    if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
+        torch.nn.init.normal_(m.weight, 0.0, 0.02)
+    if isinstance(m, nn.BatchNorm2d):
+        torch.nn.init.normal_(m.weight, 0.0, 0.02)
+        torch.nn.init.constant_(m.bias, 0)
 
-        # Model inputs
-        real_A = Variable(batch[0].type(Tensor))
-        real_B = Variable(batch[1].type(Tensor))
+def display_progress(cond, real, fake, figsize=(10,5)):
+    cond = cond.detach().cpu().permute(1, 2, 0)
+    fake = fake.detach().cpu().permute(1, 2, 0)
+    real = real.detach().cpu().permute(1, 2, 0)
 
-        # Adversarial ground truths
-        valid = Variable(Tensor(np.ones((real_A.size(0), *patch))), requires_grad=False)
-        fake = Variable(Tensor(np.zeros((real_A.size(0), *patch))), requires_grad=False)
+    fig, ax = plt.subplots(1, 3, figsize=figsize)
+    ax[0].imshow(cond)
+    ax[1].imshow(real)
+    ax[2].imshow(fake)
+    plt.show()
 
-        # ------------------
-        #  Train Generators
-        # ------------------
 
-        optimizer_G.zero_grad()
 
-        print(real_A.shape)
-        # GAN loss
-        fake_B = generator(real_A)
-        pred_fake = discriminator(fake_B, real_A)
-        loss_GAN = criterion_GAN(pred_fake, valid)
-        # Pixel-wise loss
-        loss_pixel = criterion_pixelwise(fake_B, real_B)
+# Pix2Pix, CycleGAN, AttentionGAN (https://github.com/Ha0Tang/AttentionGAN?tab=readme-ov-file)
 
-        # Total loss
-        loss_G = loss_GAN + lambda_pixel * loss_pixel
 
-        loss_G.backward()
 
-        optimizer_G.step()
 
-        # ---------------------
-        #  Train Discriminator
-        # ---------------------
+class Pix2Pix(pl.LightningModule):
 
-        optimizer_D.zero_grad()
+    def __init__(self, in_channels, out_channels, learning_rate=0.0002, lambda_recon=200, display_step=25):
 
-        # Real loss
-        pred_real = discriminator(real_B, real_A)
-        loss_real = criterion_GAN(pred_real, valid)
+        super().__init__()
+        self.save_hyperparameters()
 
-        # Fake loss
-        pred_fake = discriminator(fake_B.detach(), real_A)
-        loss_fake = criterion_GAN(pred_fake, fake)
+        self.automatic_optimization = False
 
-        # Total loss
-        loss_D = 0.5 * (loss_real + loss_fake)
+        self.display_step = display_step
+        self.gen = Generator(in_channels, out_channels)
+        self.patch_gan = PatchGAN(in_channels + out_channels)
 
-        loss_D.backward()
-        optimizer_D.step()
+        # intializing weights
+        self.gen = self.gen.apply(_weights_init)
+        self.patch_gan = self.patch_gan.apply(_weights_init)
 
-        # --------------
-        #  Log Progress
-        # --------------
+        self.adversarial_criterion = nn.BCEWithLogitsLoss()
+        self.recon_criterion = nn.L1Loss()
 
-        # Determine approximate time left
-        batches_done = epoch * len(dataloader) + i
-        batches_left = opt.n_epochs * len(dataloader) - batches_done
-        time_left = datetime.timedelta(seconds=batches_left * (time.time() - prev_time))
-        prev_time = time.time()
+    def _gen_step(self, real_images, conditioned_images):
+        # Pix2Pix has adversarial and a reconstruction loss
+        # First calculate the adversarial loss
+        fake_images = self.gen(conditioned_images)
+        disc_logits = self.patch_gan(fake_images, conditioned_images)
+        adversarial_loss = self.adversarial_criterion(disc_logits, torch.ones_like(disc_logits))
 
-        # Print log
-        sys.stdout.write(
-            "\r[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f, pixel: %f, adv: %f] ETA: %s"
-            % (
-                epoch,
-                opt.n_epochs,
-                i,
-                len(dataloader),
-                loss_D.item(),
-                loss_G.item(),
-                loss_pixel.item(),
-                loss_GAN.item(),
-                time_left,
-            )
-        )
+        # calculate reconstruction loss
+        recon_loss = self.recon_criterion(fake_images, real_images)
+        lambda_recon = self.hparams.lambda_recon
 
-        # If at sample interval save image
-        if batches_done % opt.sample_interval == 0:
-            sample_images(batches_done)
+        return adversarial_loss + lambda_recon * recon_loss
 
-    if opt.checkpoint_interval != -1 and epoch % opt.checkpoint_interval == 0:
-        # Save model checkpoints
-        torch.save(generator.state_dict(), "saved_models/%s/generator_%d.pth" % (opt.dataset_name, epoch))
-        torch.save(discriminator.state_dict(), "saved_models/%s/discriminator_%d.pth" % (opt.dataset_name, epoch))
+    def _disc_step(self, real_images, conditioned_images):
+        fake_images = self.gen(conditioned_images).detach()
+        fake_logits = self.patch_gan(fake_images, conditioned_images)
+
+        real_logits = self.patch_gan(real_images, conditioned_images)
+
+        fake_loss = self.adversarial_criterion(fake_logits, torch.zeros_like(fake_logits))
+        real_loss = self.adversarial_criterion(real_logits, torch.ones_like(real_logits))
+        return (real_loss + fake_loss) / 2
+
+    def configure_optimizers(self):
+        lr = self.hparams.learning_rate
+        gen_opt = torch.optim.Adam(self.gen.parameters(), lr=lr)
+        disc_opt = torch.optim.Adam(self.patch_gan.parameters(), lr=0.564861321564864)
+        return disc_opt, gen_opt
+
+
+    def validation_step(self, batch, batch_idx):
+
+            # sketch_img, photo_img = batch
+            real, condition = batch
+            # outputs = self.G_basestyle(sketch_img)
+            fake = self.gen(condition).detach()
+            # ssim = self.default_evaluator.run([[fake, real]]).metrics['ssim']
+            ssim = structural_similarity_index_measure(fake, real)
+            psnr = peak_signal_noise_ratio(fake, real)
+            self.log("SSIM_val", ssim)
+            print(f"SSIM_val: {ssim}")
+            self.log("PSNR_val", psnr)
+            print(f"PSNR_val: {psnr}")
+            # self.log("SSIM_valid", ssim)
+            # return ssim
+
+    def test_step(self, batch, batch_idx):
+            
+        # sketch_img, photo_img = batch
+        real, condition = batch
+        # outputs = self.G_basestyle(sketch_img)
+        fake = self.gen(condition).detach()
+        # ssim = self.default_evaluator.run([[fake, real]]).metrics['ssim']
+        ssim = structural_similarity_index_measure(fake, real)
+        psnr = peak_signal_noise_ratio(fake, real)
+        # self.log("SSIM_train", ssim)
+        self.log("SSIM_heldout_set", ssim)
+        print(f"SSIM_heldout_set: {ssim}")
+        self.log("PSNR_val", psnr)
+        print(f"PSNR_val: {psnr}")
+        # return ssim
+
+
+    def training_step(self, batch, batch_idx):
+        real, condition = batch
+
+        disc_opt, gen_opt = self.optimizers()
+
+        disc_loss = 0
+        gen_loss = 0
+        
+        if batch_idx % 2 == 0:  # Train discriminator on even batches
+            gen_opt.zero_grad()
+            gen_loss = self._gen_step(real, condition)
+            # loss = self._disc_step(real, condition)
+            self.manual_backward(gen_loss)
+            gen_opt.step()
+            print('Generator Loss', gen_loss)
+            self.log("gen_train_loss", gen_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+            
+        else:
+            disc_opt.zero_grad()
+            # loss = self._gen_step(real, condition)
+            disc_loss = self._disc_step(real, condition)
+            self.manual_backward(disc_loss)
+            disc_opt.step()
+            print('PatchGAN Loss', disc_loss)
+            self.log("disc_train_loss", disc_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+
+
+
+
+        if self.current_epoch%self.display_step==0 and batch_idx==0:
+            # print('PatchGAN Loss', disc_loss)
+            # print('Generator Loss', gen_loss)
+            fake = self.gen(condition).detach()
+
+            import random
+
+            # Generate 5 random numbers between 0 and 49 (inclusive)
+            random_numbers = random.sample(range(len(condition)-2), 5)
+
+            for i in random_numbers:
+                display_progress(condition[i], fake[i], real[i])
+            # self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+            print('-'*100)
+
+        # return loss

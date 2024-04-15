@@ -15,3 +15,8 @@ lightning_logs/*
 facades.tar.gz
 heldout_test_train_dataloader.npy
 dataset.zip
+Not Used/facades/*
+PyTorch-CycleGAN
+heldout_test.npy
+lightning_logs\*
+lightning_logs copy\*

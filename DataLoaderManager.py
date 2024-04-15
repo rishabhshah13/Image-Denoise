@@ -86,16 +86,31 @@ class DataLoaderManager:
             new_list = [img_name for img_name in folder_list if img_name not in heldout_list]
             folder_list = new_list
         
+        # for folder_name in tqdm(folder_list):
+        #     folder_path = os.path.join(root_dir, folder_name)
+        #     # print(folder_path)
+        #     if os.path.isdir(folder_path):
+        #         image_names = os.listdir(os.path.join(folder_path))
+        #         self.image_paths.append({
+        #                 'gt': os.path.join(folder_path, image_names[0]),
+        #                 'noisy': os.path.join(folder_path, image_names[1])
+        #             })
+
+        import glob
         for folder_name in tqdm(folder_list):
             folder_path = os.path.join(root_dir, folder_name)
             # print(folder_path)
+            
             if os.path.isdir(folder_path):
-                image_names = os.listdir(os.path.join(folder_path))
-                self.image_paths.append({
-                        'gt': os.path.join(folder_path, image_names[0]),
-                        'noisy': os.path.join(folder_path, image_names[1])
-                    })
-
+                # image_names = os.listdir(os.path.join(folder_path))
+                GT_images = glob.glob(os.path.join(folder_path) + '/*GT*')
+                NOISY_images = glob.glob(os.path.join(folder_path) + '/*NOISY*')
+                for i in range(len(GT_images)):
+                    self.image_paths.append({
+                            'gt': GT_images[i],
+                            'noisy': NOISY_images[i]
+                            })
+            
 
     def create_datasets(self):
         print("Creating datasets...")
@@ -130,7 +145,7 @@ class DataLoaderManager:
             data_tuple = (torch.tensor(data[i][0]), torch.tensor(data[i][1]))
             data_list.append(data_tuple)
 
-        return DataLoader(data_list, batch_size=batch_size, shuffle=False)
+        return DataLoader(data_list, batch_size=batch_size, shuffle=False,num_workers=32, persistent_workers=True,pin_memory=True)
     
 
     def process_dataloaders(self, batch_size=32, shuffle=True):
@@ -140,8 +155,8 @@ class DataLoaderManager:
             print("DataLoader loaded from .npy files.")
         else:
             train_dataset, test_dataset = self.create_datasets()
-            train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)
-            test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+            train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle,num_workers=32, persistent_workers=True,pin_memory=True)
+            test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False,num_workers=32, persistent_workers=True,pin_memory=True)
             
             
             if self.make_held_out_set == True:
