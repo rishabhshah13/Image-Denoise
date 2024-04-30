@@ -1,4 +1,3 @@
-Certainly! Here's the full README for your Image Denoising using GAN project:
 
 ---
 
